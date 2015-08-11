@@ -1,0 +1,31 @@
+#include "LoggingPolicy.h"
+
+template <class U>
+struct OpMaxSizeCreator
+{
+  static U Create()
+  {
+    U to_return(MAX_SIZE);
+    return to_return;
+  }
+
+  static std::size_t Size(){
+    return MAX_SIZE;
+  }
+};
+
+template <class U>
+struct VariableCreator
+{
+  static U Create()
+  {
+    U to_return(0);
+    return to_return;
+  }
+
+  static std::size_t Size(){
+    return 0;
+  }
+};
+
+

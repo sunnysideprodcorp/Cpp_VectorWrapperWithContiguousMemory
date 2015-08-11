@@ -1,0 +1,100 @@
+#include "batch_short_alloc2.h"
+#include <vector>
+#include <iostream>
+#include <string>
+
+constexpr int NUM_ELEMENTS = 4;
+constexpr int MAX_INDIV = sizeof(int)*MAX_SIZE;
+constexpr int N = NUM_ELEMENTS*MAX_INDIV;
+arena<N, MAX_INDIV>            myArena;
+
+
+void logIt(std::string s){
+  std::cout << s << std::endl;
+}
+
+template <class T>
+class SmallVector {
+ public:
+  std::vector<T, short_alloc<T, N, MAX_INDIV> > vec;
+  SmallVector() : vec(myArena) {};
+  SmallVector(size_t n)
+    : vec(n, myArena){}
+};
+
+template <class U>
+struct OpMaxSizeCreator
+{
+  static U Create()
+  {
+    U to_return(MAX_SIZE);
+    return to_return;
+  }
+};
+
+template <class U>
+struct VariableCreator
+{
+  static U Create()
+  {
+    U to_return(0);
+    return to_return;
+  }
+};
+  
+template <typename T,  template <class Created> class CreationPolicy >
+class VectorMaker : public CreationPolicy<SmallVector<T>> 
+{};
+
+int main()
+{
+
+  typedef int IntType;
+  typedef VectorMaker<IntType, OpMaxSizeCreator > BigVectorMaker;
+  typedef VectorMaker<IntType, VariableCreator> VariableVectorMaker;
+
+  /*
+  logIt("v_0");
+  SmallVector<IntType> v_0 = VariableVectorMaker::Create();
+  std::cout << "size of v_0 is " << v_0.vec.size() << std::endl;
+  v_0.vec.push_back(177);
+  v_0.vec.push_back(156);
+  */
+
+  logIt("v_1");
+  SmallVector<IntType> v1 = BigVectorMaker::Create();
+  logIt("v_2");
+  SmallVector<IntType> v2 = BigVectorMaker::Create();
+  logIt("v_3");
+  SmallVector<IntType> v3 = BigVectorMaker::Create();
+  logIt("v_4");
+  SmallVector<IntType> v4 = BigVectorMaker::Create();
+  logIt("v_5");
+  SmallVector<IntType> v5 = BigVectorMaker::Create();
+  logIt("v_6");
+  SmallVector<IntType> v6 = BigVectorMaker::Create()
+  logIt("v_7");
+  SmallVector<IntType> v7 = BigVectorMaker::Create();
+
+  
+  int difference = &(v1.vec[99]) - &(v2.vec[0]);
+  std::cout << "difference is: " << difference << " should be: 1"  << std::endl; 
+
+  difference = &(v4.vec[0]) - &(v5.vec[0]);
+  std::cout << "difference is: " << difference <<  " should be: -100 or some crazy number if new block (and should be new block)" << std::endl; 
+
+  difference = &(v2.vec[0]) - &(v3.vec[0]);
+  std::cout << "difference is:  " << difference <<  " should be: -100" << std::endl; 
+
+  
+  difference = &(v6.vec[0]) - &(v5.vec[0]);
+  std::cout << "difference is:  " << difference <<  " should be: 100" << std::endl; 
+
+
+  difference = &(v7.vec[0]) - &(v6.vec[0]);
+  std::cout << "difference is:  " << difference <<  " should be: 100" << std::endl; 
+
+
+  
+  return 0;
+}
