@@ -1,5 +1,8 @@
 #ifndef SHORT_ALLOC_H
 #define SHORT_ALLOC_H
+
+#include "Constants.h"
+
 #include <string>
 #include <cstddef>
 #include <cassert>
@@ -11,95 +14,75 @@
 #include <thread>
 #include <mutex>
 
-const int MAX_SIZE = 10;
-const int NUM_ELEMENTS = 4;
-constexpr int MAX_INDIV = sizeof(int)*MAX_SIZE;
-constexpr int MAX_BLOCK = NUM_ELEMENTS*MAX_INDIV;
-std::mutex myMutex;
+// This code is built on top of Howard Hinnant's stack_alloc class
+// https://howardhinnant.github.io/stack_alloc.html
 
+// This mutex is used to control access to memory blocks held by 
+std::mutex memoryMutex;
+
+// The Arena class tracks and allocates blocks of memory for custom allocator ShortAlloc
+// N and MAX_SIZE are parameters that do not at present enforce rules limiting memory use, but
+// could be put to that purpose. MemPolicy determines whether memory will be reused rather than
+// simply allocated in contiguous blocks that are just discarded when deallocated
 template <std::size_t N, std::size_t MAX_SIZE, int ID, template <class Created> class MemPolicy>
-  class arena : public MemPolicy<char>
+  class Arena : public MemPolicy<char>
 {
+ public:
+  std::function<void(std::string)> print;
+  std::mutex m_memoryMutex;
+  
+  Arena() noexcept : ptr_(buf_) { buffers.push_back(buf_); }
+    
+  ~Arena() {
+    ptr_ = nullptr;
+    for(auto buffer: buffers){
+      delete buffer;
+    }           
+  }
+
+  // Arena is managed as a Singleton class, so some default functions are inappropriate 
+  Arena(const Arena&) = delete;
+  Arena& operator=(const Arena&) = delete;
+
+  // These are the functions used by the custom allocator to dole out memory
+  char* allocate(std::size_t n);
+  void deallocate(char* p, std::size_t n) noexcept;
+
+  // These functions allow users to get explicit info about a memory block
+  // and minimally manipulate access tot he memory block
+  static constexpr std::size_t size() {return N;}
+  std::size_t used() const {return static_cast<std::size_t>(ptr_ - buf_);}
+  void reset() {ptr_ = buf_;}
+
+ private:
+  // Variables to track managed memory
   static const std::size_t alignment = 16;
   char* buf_ = new char[N];
   char* ptr_;
   std::vector<char*> buffers;
-    
-  bool
-    pointer_in_buffer(char* p) noexcept
+
+  // Safety method to checked returned memory locations
+  bool pointer_in_buffer(char* p) noexcept
   {
     bool to_return =  buf_ <= p && p <= buf_ + N;
     return to_return;
   }
-
- public:
-  std::function<void(std::string)> print;
-  arena() noexcept : ptr_(buf_) {
-    buffers.push_back(buf_);
-  }
-    
-  ~arena() {
-    std::cout << "running arena destructor" << std::endl;
-    ptr_ = nullptr;
-    for(auto buffer: buffers){
-      delete buffer;
-    }
-            
-  }
-
-  arena(const arena&) = delete;
-  arena& operator=(const arena&) = delete;
-
-  char* allocate(std::size_t n);
-  void deallocate(char* p, std::size_t n) noexcept;
-
-  static constexpr std::size_t size() {return N;}
-  std::size_t used() const {return static_cast<std::size_t>(ptr_ - buf_);}
-  void reset() {ptr_ = buf_;}
 };
 
 
-template <typename T>
-class ArenaSingleton
-{
- public:
-  static T& GetInstance(){
-    static T s_instance;
-    std::cout << "running singleton get instance" << std::endl;
-    return s_instance;
-  }
-
-  
-};
-
+// Allocates memory in a managed memory block 
 template <std::size_t N, std::size_t MAX_SIZE, int ID, template <class Created> class MemPolicy>
   char*
-  arena<N, MAX_SIZE, ID, MemPolicy>::allocate(std::size_t n)
+  Arena<N, MAX_SIZE, ID, MemPolicy>::allocate(std::size_t n)
 {
-  //  std::cout << "1. CURRENT BUFFER IS " << (void *) buf_ << std::endl;
-  //std::cout << "2. CURRENT pointer IS " << (void *) ptr_ << std::endl;
-  std::cout << "3. !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!there is this much space left in buffer before allocating current request " << (buf_ + N - ptr_)/4 << std::endl; 
-
   char* availableSlot = MemPolicy<char>::findMemory(n);
-  if(availableSlot){
-    std::cout << "using existing memory so # should not go down" << std::endl;
-    return availableSlot;
-  }
+  if ( availableSlot ) { return availableSlot; } // Reuse memory if available
   
-  if ((buf_ + N - ptr_) >= n)
-    {
+  if ( (buf_ + N - ptr_) >= n ) {     // Use memory from current buffer if large enough
       char* r = ptr_;
       ptr_ += n;
-      std::cout << "5. there is this much space left now " << (buf_ + N - ptr_)/4 << std::endl; 
-      std::thread::id this_id = std::this_thread::get_id();
-      std::cout << "ending with " << this_id << std::endl;
       return r;
-    }
-  else
-    {
-      std::string to_use = "MAKING A NEW BUFFER  " + std::to_string(n/4) + " was too big for " + std::to_string((buf_ + N - ptr_)/4);
-      print(to_use);
-
+  }  else {                           // Create new buffer if existing buffer not large enough, move old buffer to list of available memory
       MemPolicy<char>::addMemory(ptr_, (buf_ + N - ptr_ ));
       buf_ = new char[N];
       ptr_ = buf_;
@@ -107,21 +90,18 @@ template <std::size_t N, std::size_t MAX_SIZE, int ID, template <class Created> 
 
       char *r = ptr_;
       ptr_ += n;
-      std::cout << "5. there is this much space left now " << (buf_ + N - ptr_)/4 << std::endl; 
-      std::thread::id this_id = std::this_thread::get_id();
-      std::cout << "ending with " << this_id << std::endl;
       return r;
     }
-
-  return static_cast<char*>(::operator new(n));
-  
 }
 
+// Deallocates memory originally in one of the class's managed memory buffers
+// Returns this memory to the list of available memory, so it can be reused
+// Given appropriate memory type
 template <std::size_t N, std::size_t MAX_SIZE, int ID, template <class Created> class MemPolicy>
   void
-  arena<N, MAX_SIZE, ID, MemPolicy>::deallocate(char* p, std::size_t n) noexcept
+  Arena<N, MAX_SIZE, ID, MemPolicy>::deallocate(char* p, std::size_t n) noexcept
 {
-  std::cout << "running deallocate" << std::endl;
+
   MemPolicy<char>::addMemory(p, n);
   if (pointer_in_buffer(p))
     {
@@ -130,34 +110,55 @@ template <std::size_t N, std::size_t MAX_SIZE, int ID, template <class Created> 
     } 
 }
 
-template <class T, std::size_t N, std::size_t MAX_SIZE, int ID, template <class Created> class MemPolicy>
-  class short_alloc
+
+
+// So long as Arenas are made via ArenaSingleton, only one Arena for each
+// set of template parameters will be made. This ensures all SmallVectors
+// with same template parameters are stored in a contiguous memory location
+// The int ID template parameter is specifically to ensure that many singletons
+// identical except for identity can be made if desired
+template <typename T>
+class ArenaSingleton
 {
-  arena<N, MAX_SIZE, ID, MemPolicy>& a_;
+ public:
+  static T& GetInstance(){
+    static T s_instance;
+    return s_instance;
+  }  
+};
+
+template <class T, std::size_t N, std::size_t MAX_SIZE, int ID, template <class Created> class MemPolicy>
+  class ShortAlloc
+{
  public:
   typedef T value_type;
-  template <class _Up> struct rebind {typedef short_alloc<_Up, N, MAX_SIZE, ID, MemPolicy> other;};
-  short_alloc(arena<N, MAX_SIZE, ID, MemPolicy>& a) noexcept : a_(a) {}
+
+  template <class _Up> struct rebind {typedef ShortAlloc<_Up, N, MAX_SIZE, ID, MemPolicy> other;};
+  ShortAlloc(Arena<N, MAX_SIZE, ID, MemPolicy>& a) noexcept : a_(a) {}
 
   template <class U>
-    short_alloc(const short_alloc<U, N, MAX_SIZE, ID, MemPolicy>& a) noexcept
+    ShortAlloc(const ShortAlloc<U, N, MAX_SIZE, ID, MemPolicy>& a) noexcept
     : a_(a.a_) {}
-  short_alloc(const short_alloc&) = default;
-  short_alloc& operator=(const short_alloc&) = delete;
 
+  ShortAlloc(const ShortAlloc&) = default;
+  ShortAlloc& operator=(const ShortAlloc&) = default; //delete;
+
+  // The custom allocator's allocate method in turn calls the hidden Arena's allocate method
   T* allocate(std::size_t n)
   {
-    std::lock_guard<std::mutex> guard(myMutex);
+    std::lock_guard<std::mutex> guard(a_.m_memoryMutex);
     return reinterpret_cast<T*>(a_.allocate(n*sizeof(T)));
-
   }
+
+  // The custom allocator's deallocate method in turn calls the hidden Arena's deallocate method
   void deallocate(T* p, std::size_t n) noexcept
   {
-
-    std::lock_guard<std::mutex> guard(myMutex);
+    std::lock_guard<std::mutex> guard(a_.m_memoryMutex);
     a_.deallocate(reinterpret_cast<char*>(p), n*sizeof(T));
-
   }
+
+ private:
+  Arena<N, MAX_SIZE, ID, MemPolicy>& a_;
 };
 
 

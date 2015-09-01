@@ -3,38 +3,35 @@
 
 #include "LoggingPolicy.h"
 
-//Create a vector with the MAX_SIZE reserved from initialization
-//Better default when users have mixed-use cases or are unsure
-//How/when they will resize or size vectors
+// Creates a vector with MAX_SIZE reserved
+// This is a good default particularly when users expect to add to
+// SmallVectors at several points in time rather than a single initialization
 template <class U>
-struct OpMaxSizeCreator
+struct SizedCreator
 {
-  static U Create()
+  static U Create ()
   {
     U to_return(MAX_SIZE);
     return to_return;
   }
 
-  static std::size_t Size(){
-    return MAX_SIZE;
-  }
+  static std::size_t Size () { return MAX_SIZE; }
 };
 
-//Create a vector with 0 memory reserved from initialization
-//Better in cases where users know exactly how many elements they want to reserve
-//And will do so themselves immediately after initialization
+// Creates a vector with 0 memory reserved from initialization
+// This is the better option when users know exactly how much
+// space to reserve for each SmallVector used and do not anticipate
+// many subsequent modifications
 template <class U>
-struct VariableCreator
+struct ZeroCreator
 {
-  static U Create()
+  static U Create ()
   {
     U to_return(0);
     return to_return;
   }
 
-  static std::size_t Size(){
-    return 0;
-  }
+  static std::size_t Size () { return 0; }
 };
 
 
