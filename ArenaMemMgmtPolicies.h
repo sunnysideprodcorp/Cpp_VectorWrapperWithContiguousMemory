@@ -70,7 +70,7 @@ struct ManageMem
     
 template <typename T>
 struct NoManageMem {
-  void addMemory(char* p, std::size_t n){ return nullptr; }
+  void findMemory(char* p, std::size_t n){ return nullptr; }
   void addMemory(char* p, std::size_t n){ }
 };
 
