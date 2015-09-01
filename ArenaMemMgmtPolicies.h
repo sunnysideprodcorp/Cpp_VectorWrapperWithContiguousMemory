@@ -69,6 +69,9 @@ struct ManageMem
 };
     
 template <typename T>
-struct NoManageMem {};
+struct NoManageMem {
+  void addMemory(char* p, std::size_t n){ return nullptr; }
+  void addMemory(char* p, std::size_t n){ }
+};
 
 #endif  // ARENA_MEM_POLICY_H
